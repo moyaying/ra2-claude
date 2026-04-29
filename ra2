@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# Red Alert 2 sounds for Claude Code — improved edition.
+# Single script: invoked by hooks to play, by user to control.
+#
+# Usage:
+#   ra2 play <event>        # called by Claude hooks
+#   ra2 enable | disable | toggle | status
+#   ra2 test <event>        # play one sound now
+#   ra2 events              # list known events
+#
+# Events: start | prompt | done | compact | approval
+
+set -euo pipefail
+
+RA2_HOME="${RA2_HOME:-$HOME/.claude/ra2}"
+SOUNDS_DIR="${RA2_SOUNDS_DIR:-$RA2_HOME/sounds}"
+DISABLED_FLAG="$RA2_HOME/disabled"
+VOLUME="${RA2_VOLUME:-0.3}"
+
+# Anti-spam: minimum seconds between two plays of the same event.
+declare -A MIN_GAP=(
+  [done]=3
+  [prompt]=2
+  [start]=0
+  [compact]=0
+  [approval]=0
+)
+
+events() { echo "start prompt done compact approval"; }
+_now() { date +%s; }
+
+_pick_random() {
+  local dir="$1"
+  [ -d "$dir" ] || return 1
+  shopt -s nullglob
+  local files=("$dir"/*.wav "$dir"/*.mp3 "$dir"/*.m4a "$dir"/*.aiff)
+  shopt -u nullglob
+  [ ${#files[@]} -eq 0 ] && return 1
+  echo "${files[RANDOM % ${#files[@]}]}"
+}
+
+_play_file() {
+  local file="$1"
+  if command -v afplay >/dev/null 2>&1; then
+    afplay -v "$VOLUME" "$file" >/dev/null 2>&1 &
+  elif command -v paplay >/dev/null 2>&1; then
+    local v
+    v=$(awk "BEGIN{printf \"%d\", $VOLUME*65536}")
+    paplay --volume="$v" "$file" >/dev/null 2>&1 &
+  elif command -v aplay >/dev/null 2>&1; then
+    aplay -q "$file" >/dev/null 2>&1 &
+  elif command -v ffplay >/dev/null 2>&1; then
+    ffplay -nodisp -autoexit -loglevel quiet -volume "$(awk "BEGIN{printf \"%d\", $VOLUME*100}")" "$file" >/dev/null 2>&1 &
+  else
+    return 1
+  fi
+  disown 2>/dev/null || true
+}
+
+_should_throttle() {
+  local event="$1"
+  local gap="${MIN_GAP[$event]:-0}"
+  [ "$gap" -eq 0 ] && return 1
+  local stamp="$RA2_HOME/.last-$event"
+  if [ -f "$stamp" ]; then
+    local last now
+    last=$(stat -f %m "$stamp" 2>/dev/null || stat -c %Y "$stamp" 2>/dev/null || echo 0)
+    now=$(_now)
+    if [ $((now - last)) -lt "$gap" ]; then
+      return 0
+    fi
+  fi
+  mkdir -p "$RA2_HOME"
+  touch "$stamp"
+  return 1
+}
+
+cmd_play() {
+  local event="${1:-}"
+  [ -z "$event" ] && exit 0
+  [ -f "$DISABLED_FLAG" ] && exit 0
+  _should_throttle "$event" && exit 0
+  local file
+  file=$(_pick_random "$SOUNDS_DIR/$event") || exit 0
+  _play_file "$file" || exit 0
+  exit 0
+}
+
+cmd_enable()  { rm -f "$DISABLED_FLAG"; echo "ra2: ON"; }
+cmd_disable() { mkdir -p "$RA2_HOME"; touch "$DISABLED_FLAG"; echo "ra2: OFF"; }
+cmd_toggle()  { [ -f "$DISABLED_FLAG" ] && cmd_enable || cmd_disable; }
+cmd_status() {
+  if [ -f "$DISABLED_FLAG" ]; then echo "ra2: OFF"; else echo "ra2: ON"; fi
+  echo "  home:    $RA2_HOME"
+  echo "  sounds:  $SOUNDS_DIR"
+  echo "  volume:  $VOLUME"
+  for e in $(events); do
+    local d="$SOUNDS_DIR/$e"
+    if [ -d "$d" ]; then
+      local n
+      n=$(find "$d" -maxdepth 1 -type f \( -iname '*.wav' -o -iname '*.mp3' -o -iname '*.m4a' -o -iname '*.aiff' \) | wc -l | tr -d ' ')
+      echo "  [$e] $n file(s)"
+    else
+      echo "  [$e] (missing)"
+    fi
+  done
+}
+
+cmd_test() {
+  local event="${1:-}"
+  [ -z "$event" ] && { echo "usage: ra2 test <event>" >&2; exit 2; }
+  local file
+  file=$(_pick_random "$SOUNDS_DIR/$event") || { echo "no sounds for '$event' in $SOUNDS_DIR/$event" >&2; exit 1; }
+  echo "playing: $file"
+  _play_file "$file" || { echo "no audio backend found (need afplay / paplay / aplay / ffplay)" >&2; exit 1; }
+  wait
+}
+
+usage() {
+  sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+  exit "${1:-0}"
+}
+
+main() {
+  local sub="${1:-}"
+  shift || true
+  case "$sub" in
+    play)    cmd_play "$@" ;;
+    enable)  cmd_enable ;;
+    disable) cmd_disable ;;
+    toggle)  cmd_toggle ;;
+    status)  cmd_status ;;
+    test)    cmd_test "$@" ;;
+    events)  events ;;
+    -h|--help|help|"") usage 0 ;;
+    *) echo "unknown command: $sub" >&2; usage 2 ;;
+  esac
+}
+
+main "$@"
