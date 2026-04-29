@@ -19,13 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR ITS USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-NOTE ON AUDIO ASSETS
-
-The `.wav` files under `sounds/` are NOT covered by the MIT license above.
-They originate from Westwood Studios / Electronic Arts' "Red Alert 2" and are
-included for personal, non-commercial use only. Their copyright belongs to
-their respective owners. If you redistribute, fork, or repackage this
-repository, you do so at your own risk with respect to those audio assets.
